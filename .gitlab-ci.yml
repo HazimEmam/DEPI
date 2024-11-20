@@ -1,0 +1,48 @@
+variables:
+    BACKEND_IMAGE_NAME: hazimemam/go-app:1.0
+    FRONTEND_IMAGE_NAME: hazimemam/react-app:1.0
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+
+stages:
+    - build
+    - terraform
+
+build_images:
+    stage: build
+    image: docker:24.0.5
+    services:
+        - docker:24.0.5-dind
+    before_script:
+        - docker login -u $REGISTRY_USER -p $REGISTRY_PASS
+    script:
+        - echo "Building Go backend..."
+        - docker build -t $BACKEND_IMAGE_NAME ./Clinic-Reservation-System
+        - echo "Building React frontend..."
+        - docker build -t $FRONTEND_IMAGE_NAME ./front_end_project
+        - echo "Pushing Docker images to registry..."
+        - docker push $BACKEND_IMAGE_NAME
+        - docker push $FRONTEND_IMAGE_NAME
+
+terraform:
+    image:
+        name: hashicorp/terraform:1.5.0
+        entrypoint: [ "" ]
+    stage: terraform
+    script:
+        - cd ./terraform
+        - sh ./terraform.sh
+    cache: 
+        paths:
+            - ./terraform/.terraform
+            - ./terraform/.terraform.lock.hcl
+            - ./terraform/.terraform.lock.hcl.info
+            - ./terraform/terraform.tfstate
+            - ./terraform/terraform.tfstate.backup
+            - ./terraform/script-output.log
+    artifacts: 
+        paths:
+            - ./terraform/terraform-output.json
+            - ./terraform/terraform-output.txt
+            - ./terraform/script-output.log
+

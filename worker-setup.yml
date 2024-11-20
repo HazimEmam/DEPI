@@ -1,0 +1,99 @@
+- name: Setup Worker Node
+  hosts: worker
+  become: yes
+  tasks:
+    # Disable UFW (Uncomplicated Firewall) on Worker
+    - name: Disable UFW (Uncomplicated Firewall)
+      ufw:
+        state: disabled
+
+    # Disable Swap on Worker
+    - name: Disable swap on all nodes
+      shell: |
+        swapoff -a
+        sed -i '/swap/d' /etc/fstab
+
+    # K8s Setup (containerd installation)
+    - name: Create containerd-install.sh script on worker nodes
+      copy:
+        dest: /usr/local/bin/containerd-install.sh
+        content: |
+          #!/bin/sh
+          echo "Make script executable using chmod u+x FILE_NAME.sh"
+          echo "Containerd installation script"
+          echo "Instructions from https://kubernetes.io/docs/setup/production-environment/container-runtimes/"
+          
+          echo "Creating containerd configuration file with list of necessary modules that need to be loaded with containerd"
+          cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+          overlay
+          br_netfilter
+          EOF
+
+          echo "Load containerd modules"
+          sudo modprobe overlay
+          sudo modprobe br_netfilter
+
+          echo "Creates configuration file for kubernetes-cri file (changed to k8s.conf)"
+          cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward                 = 1
+          EOF
+
+          echo "Applying sysctl params"
+          sudo sysctl --system
+
+          echo "Verify that the br_netfilter, overlay modules are loaded by running the following commands:"
+          lsmod | grep br_netfilter
+          lsmod | grep overlay
+
+          echo "Verify that the net.bridge.bridge-nf-call-iptables, net.bridge.bridge-nf-call-ip6tables, and net.ipv4.ip_forward system variables are set to 1 in your sysctl config by running the following command:"
+          sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+
+          echo "Update packages list"
+          sudo apt-get update
+
+          echo "Install containerd"
+          sudo apt-get -y install containerd
+
+          echo "Create a default config file at default location"
+          sudo mkdir -p /etc/containerd
+          sudo containerd config default | sudo tee /etc/containerd/config.toml
+
+          echo "Restarting containerd"
+          sudo systemctl restart containerd
+
+    - name: Make containerd-install.sh executable
+      file:
+        path: /usr/local/bin/containerd-install.sh
+        mode: '0755'
+
+    - name: Run containerd-install.sh script on worker nodes
+      command: /usr/local/bin/containerd-install.sh
+
+    # Ensure SystemdCg is set to true in /etc/containerd/config.toml
+    - name: Ensure SystemdCg is set to true in /etc/containerd/config.toml
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^SystemdCg'
+        line: 'SystemdCg = true'
+        state: present
+
+    - name: Restart containerd service
+      service:
+        name: containerd
+        state: restarted
+
+    # Restart kubelet service (ignore errors if kubelet is not found)
+    - name: Restart kubelet service if it exists
+      service:
+        name: kubelet
+        state: restarted
+      ignore_errors: true  # This will ignore errors if kubelet is not found
+
+    # Join Kubernetes Cluster
+    - name: Join worker node to Kubernetes cluster
+      shell: |
+        sudo kubeadm join 192.168.44.138:6443 --token mri80p.qfq03r1ubqjrtzl9 \
+                --discovery-token-ca-cert-hash sha256:21faf0ad6542dbf130f93e41ab5659c232094610d92b769171837b14ba2e6619
+      ignore_errors: true  # This will allow the playbook to continue even if this command fails
