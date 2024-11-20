@@ -14,5 +14,3 @@ It is required to implement the following features:
 7- Patients can view all his reservations. 
 
 Languages and frameworks used are: Go lang , React and PostgreSQL.
-
-Collaboratores are : Hazim Emam Mohamed Ali , Youssef Aboud , Ramez Talaat 
